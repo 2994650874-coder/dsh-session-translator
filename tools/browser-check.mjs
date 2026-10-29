@@ -469,19 +469,38 @@ ${shellFixtures()}
       log('collapsed text never requested', stats.translateCalls.indexOf(${JSON.stringify(REASONING_B)}) === -1)
       log('streaming text never requested', stats.translateCalls.indexOf(${JSON.stringify(REASONING_D)}) === -1)
 
+      // [PATCH 2026-10-30 head-click] 「收起/展开」按钮已撤，整个头胶囊是开关。
       // Panel buttons must stop propagation into the row handler.
       window.__rowClicked = 0
-      var toggle = expanded.querySelector('[data-act="toggle"]')
+      var head = expanded.querySelector('[data-role="head"]')
       var copy = expanded.querySelector('[data-act="copy"]')
-      log('panel has toggle and copy', toggle !== null && copy !== null)
-      toggle.click()
-      copy.click()
+      var staleToggle = expanded.querySelector('[data-act="toggle"]')
+      log('the separate collapse button is gone', staleToggle === null, staleToggle === null ? '' : 'still present')
+      log('the panel head is the toggle', head !== null && copy !== null)
       var body = expanded.querySelector('[data-role="body"]')
-      log('toggle collapses the translation', body !== null && body.getAttribute('data-collapsed') === 'true')
+      // 点头胶囊 = 收起（官方 DisclosureRow 的整行点击）
+      head.click()
+      log('clicking the head collapses the translation', body !== null && body.getAttribute('data-collapsed') === 'true')
+      log('head click does not bubble into the row', window.__rowClicked === 0, window.__rowClicked)
+      head.click()
+      log('clicking the head again restores it', body !== null && body.getAttribute('data-collapsed') === 'false')
+      // 按钮仍然只做自己的事，不能顺带把面板收起（否则「复制」会关掉译文）
+      copy.click()
+      log('action buttons do not toggle the panel', body !== null && body.getAttribute('data-collapsed') === 'false')
       log('buttons do not bubble into the row', window.__rowClicked === 0, window.__rowClicked)
-      toggle.click()
-      log('toggle restores the translation', body !== null && body.getAttribute('data-collapsed') === 'false')
 
+      // [PATCH 2026-10-30 head-click] 拖选不能误触：从头按下拖到正文再松手，
+      // 面板不该收起。用 pointer 事件模拟（浏览器在 click 前已可能收起选区，
+      // 所以判据是拖拽距离而不是选区状态）。
+      var dragHead = expanded.querySelector('[data-role="head"]')
+      var dragBody = expanded.querySelector('[data-role="body"]')
+      var rectBase = dragHead.getBoundingClientRect ? dragHead.getBoundingClientRect() : { left: 10, top: 10 }
+      dragHead.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, buttons: 1, clientX: rectBase.left + 5, clientY: rectBase.top + 5 }))
+      dragHead.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, buttons: 1, clientX: rectBase.left + 120, clientY: rectBase.top + 60 }))
+      dragHead.click()
+      log('a drag that starts on the head does not toggle the panel',
+        dragBody !== null && dragBody.getAttribute('data-collapsed') === 'false',
+        dragBody === null ? 'no body' : dragBody.getAttribute('data-collapsed'))
       // [PATCH 2026-10-30 turn-follow] 回合跟随：当前回合展开、旧回合收成一行、
       // 手动展开的闩锁不被抢、译文框自己跟到底。
       var turn1 = panelIn('row-turn-1')
