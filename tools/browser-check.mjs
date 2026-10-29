@@ -124,6 +124,14 @@ const REASONING_B = 'This block is collapsed, so a reader cannot see it and it m
 const REASONING_C = 'The geometry fallback has to catch rows a build renders open without the data-expanded attribute on them.'
 const REASONING_D = 'Streaming blocks are only translated when live translation is switched on explicitly.'
 
+// [PATCH 2026-10-30 turn-follow] 回合跟随的样本：两轮各自一段思考，第三轮在
+// 断言中途才插进来（模拟"用户发了下一条消息"）。
+const TURN_TEXT_1 = 'The first turn finished a while ago and the reader has moved on, so this translation should fold away as soon as a newer turn exists.'
+const TURN_TEXT_2 = 'The second turn is the newest one the reader is actually looking at, so its translation must stay open while it is the current turn.'
+const TURN_TEXT_3 = 'A third turn has just arrived, which is what should fold the second turn away without touching anything the reader opened by hand.'
+// 译文框必须真的能滚，否则"跟随滚动"这条断言会退化成永远成立。
+const TURN_LONG_TAIL = Array.from({ length: 40 }, (_unused, i) => 'line ' + (i + 1) + ': the translation keeps growing while the model is still thinking.').join(String.fromCharCode(10))
+
 // [PATCH 2026-10-19 dropdown-row-squash] 模型下拉的回归样本：真机上
 // workbuddy-ai 注册了 12 个模型，正是"候选总高超过 maxHeight 260px → flex
 // 压缩每一行 → overflow:hidden 裁掉下半截"的触发条件。模型少时不会出现，
@@ -167,6 +175,9 @@ const server = {
     skipMostlyChinese: true,
     showOriginal: false,
     fontSizePx: 13,
+    // [PATCH 2026-10-30 turn-follow] 回合跟随默认开，fixture 显式写出来，
+    // 免得默认值一改，下面的回合断言变成静默失效。
+    autoTurnFollow: true,
   },
   translateCalls: [],
   configWrites: [],
@@ -316,7 +327,22 @@ function shellFixtures() {
   .lcKema_row { height: 24px; }
   .lcKema_thinkBody { white-space: pre-wrap; padding: 4px 0 4px 22px; }
   .tall { min-height: 140px; }
+  /* [PATCH 2026-10-30 turn-follow] 回合样本：官方 flow item 的
+     data-chat-turn 挂在每一行外面，插件只读它。 */
+  .turn { margin: 8px 0; }
 </style>
+<div class="turn" data-chat-turn="1" id="turn-1">
+  <div class="lcKema_root" id="row-turn-1" data-variant="think" data-state="ok" data-expanded>
+    <div class="lcKema_row"><span class="lcKema_title">思考</span></div>
+    <div class="lcKema_bodywrap"><div class="lcKema_thinkBody">${TURN_TEXT_1}</div></div>
+  </div>
+</div>
+<div class="turn" data-chat-turn="2" id="turn-2">
+  <div class="lcKema_root" id="row-turn-2" data-variant="think" data-state="ok" data-expanded>
+    <div class="lcKema_row"><span class="lcKema_title">思考</span></div>
+    <div class="lcKema_bodywrap"><div class="lcKema_thinkBody">${TURN_TEXT_2}</div></div>
+  </div>
+</div>
 <div class="lcKema_root" id="row-expanded" data-variant="think" data-state="ok" data-expanded>
   <div class="lcKema_row"><span class="lcKema_title">思考</span></div>
   <div class="lcKema_bodywrap"><div class="lcKema_thinkBody">${REASONING_A}</div></div>
@@ -419,7 +445,10 @@ ${shellFixtures()}
       log('original text preserved', original === ${JSON.stringify(REASONING_A)}, original.slice(0, 30))
 
       var stats = await (await fetch('/__stats', { cache: 'no-store' })).json()
-      log('two distinct texts, two requests', stats.translateCalls.length === 2, JSON.stringify(stats.translateCalls.map(function (t) { return t.slice(0, 20) })))
+      // [PATCH 2026-10-30 turn-follow] fixture 里多了两段回合样本（TURN_TEXT_1/2），
+      // 所以"两条不同文本"的旧口径变成四条。改断言而不是改 fixture：丢样本会让
+      // 回合断言失去可翻译的真实内容。
+      log('two distinct texts, four requests (incl. the turn samples)', stats.translateCalls.length === 4, JSON.stringify(stats.translateCalls.map(function (t) { return t.slice(0, 20) })))
       log('identical text requested once', stats.translateCalls.filter(function (t) { return t === ${JSON.stringify(REASONING_A)} }).length === 1)
       log('collapsed text never requested', stats.translateCalls.indexOf(${JSON.stringify(REASONING_B)}) === -1)
       log('streaming text never requested', stats.translateCalls.indexOf(${JSON.stringify(REASONING_D)}) === -1)
@@ -437,6 +466,59 @@ ${shellFixtures()}
       toggle.click()
       log('toggle restores the translation', body !== null && body.getAttribute('data-collapsed') === 'false')
 
+      // [PATCH 2026-10-30 turn-follow] 回合跟随：当前回合展开、旧回合收成一行、
+      // 手动展开的闩锁不被抢、译文框自己跟到底。
+      var turn1 = panelIn('row-turn-1')
+      var turn2 = panelIn('row-turn-2')
+      var bodyOf = function (panel) { return panel === null ? null : panel.querySelector('[data-role="body"]') }
+      var collapsedOf = function (panel) {
+        var b = bodyOf(panel)
+        return b === null ? 'missing' : b.getAttribute('data-collapsed')
+      }
+      log('both turns translated', turn1 !== null && turn2 !== null && /【中】/.test(turn1.textContent) && /【中】/.test(turn2.textContent),
+        collapsedOf(turn1) + '/' + collapsedOf(turn2))
+      log('the newest turn stays expanded', collapsedOf(turn2) === 'false', collapsedOf(turn2))
+      log('the older turn folds to one line', collapsedOf(turn1) === 'true', collapsedOf(turn1))
+
+      // 读者手动展开旧回合 → 闩锁，此后新回合也不会把它收回。
+      bodyOf(turn1).click()
+      log('clicking the folded preview expands the older turn', collapsedOf(turn1) === 'false', collapsedOf(turn1))
+
+      // 第三轮到达（用户发了下一条消息）：旧回合该收，但闩锁的那一条不动。
+      var turn3 = document.createElement('div')
+      turn3.className = 'turn'
+      turn3.setAttribute('data-chat-turn', '3')
+      turn3.id = 'turn-3'
+      turn3.innerHTML = '<div class="lcKema_root" id="row-turn-3" data-variant="think" data-state="ok" data-expanded>' +
+        '<div class="lcKema_row"><span class="lcKema_title">思考</span></div>' +
+        '<div class="lcKema_bodywrap"><div class="lcKema_thinkBody">' + ${JSON.stringify(TURN_TEXT_3)} + '</div></div></div>'
+      document.body.appendChild(turn3)
+      var turn3Panel = await waitFor(function () { return panelIn('row-turn-3') }, 12000)
+      log('the arriving turn is translated', turn3Panel !== null && /【中】/.test(turn3Panel.textContent))
+      await waitFor(function () { return collapsedOf(turn2) === 'true' }, 12000)
+      log('a newer turn folds the previous one', collapsedOf(turn2) === 'true', collapsedOf(turn2))
+      log('a panel the reader opened is never auto-folded', collapsedOf(turn1) === 'false', collapsedOf(turn1))
+      log('the arriving turn itself stays open', collapsedOf(turn3Panel) === 'false', collapsedOf(turn3Panel))
+
+      // 跟随滚动：译文超过限高框时，框内应自动跟到底（除非读者上滚）。
+      var scrollBody = bodyOf(turn3Panel)
+      scrollBody.style.maxHeight = '80px'
+      scrollBody.style.overflowY = 'auto'
+      scrollBody.textContent = ${JSON.stringify(TURN_LONG_TAIL)}
+      var retryButton = turn3Panel.querySelector('[data-act="retry"]')
+      if (retryButton !== null) retryButton.click()
+      await new Promise(function (resolve) { setTimeout(resolve, 900) })
+      log('the translation box follows its own bottom',
+        scrollBody.scrollHeight - scrollBody.scrollTop - scrollBody.clientHeight <= 30,
+        scrollBody.scrollTop + '/' + (scrollBody.scrollHeight - scrollBody.clientHeight))
+
+      // 读者上滚 → 接管，不再被拽回底部。
+      scrollBody.dispatchEvent(new WheelEvent('wheel', { deltaY: -120, bubbles: true }))
+      scrollBody.scrollTop = 0
+      var retry2 = turn3Panel.querySelector('[data-act="retry"]')
+      if (retry2 !== null) retry2.click()
+      await new Promise(function (resolve) { setTimeout(resolve, 900) })
+      log('scrolling up hands the position to the reader', scrollBody.scrollTop <= 30, scrollBody.scrollTop)
       // Master switch off: every panel goes away.
       await fetch('/dsh-session-translator/config', {
         method: 'PUT',

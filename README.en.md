@@ -357,7 +357,7 @@ dsh-session-translator/
 
 ## Version History
 
-**Current version `0.2.1-3`, aligned with the official DSH release number.**
+**Current version `0.2.1-4`, aligned with the official DSH release number.**
 
 Versioning rules:
 
@@ -383,6 +383,7 @@ Versioning rules:
 | `0.1.6` | 2026-10-20 | Identity unification & panel usability | Package/routes/storage renamed to dsh-session-translator; save bar moved to the top; description rewritten around capabilities |
 | `0.2.1` | 2026-10-20 | Aligned with DSH | Aligned with DSH; bilingual plugin description; versioning scheme established |
 | `0.2.1-1` | 2026-10-20 | **Current · first npm release** | Lifecycle teardown (`dispose`); `author` moved to the fork maintainer with the original author in `contributors`; first npm publication (prerelease channel) |
+| `0.2.1-4` | 2026-10-30 | **Current · turn follow** | Only the current turn's translation stays open; the previous turn folds into a one-line preview when the next message arrives (animated, not a snap). A panel you opened by hand is latched open and never auto-folded. The translation box follows its own bottom while text grows, and scrolling up or dragging a selection hands the position straight back. |
 
 ## Changelog (maintained fork)
 
