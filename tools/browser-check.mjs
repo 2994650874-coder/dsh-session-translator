@@ -528,6 +528,43 @@ ${shellFixtures()}
       document.dispatchEvent(new Event('visibilitychange'))
       var reopened = await waitFor(function () { return collapsedOf(turn2) === 'false' }, 20000)
       log('turning the setting off re-expands the folded turns', reopened !== null, collapsedOf(turn2))
+      // [PATCH 2026-10-30 row-window] 长会话回归：曾经只对账文档前 80 行，
+      // 最新几轮排在末尾永远轮不到（历史有译文、最新一条没有，且不报错）。
+      // fixture 塞 100 个早期回合 + 末尾新回合，断言末尾那条照样出译文。
+      var bulk = document.createElement('div')
+      bulk.id = 'long-history'
+      var bulkHtml = ''
+      for (var hi = 0; hi < 100; hi += 1) {
+        bulkHtml += '<div class="turn" data-chat-turn="' + (10 + hi) + '">' +
+          '<div class="lcKema_root" data-variant="think" data-state="ok">' +
+          '<div class="lcKema_row"><span class="lcKema_title">思考</span></div>' +
+          '<div class="lcKema_bodywrap"><div class="lcKema_thinkBody">History row ' + hi + ' sits far above the window and must not starve the newest turn of a translation.</div></div></div></div>'
+      }
+      bulk.innerHTML = bulkHtml
+      document.body.insertBefore(bulk, document.body.firstChild)
+      // 断言必须是「面板消失后能重建」，不能是「面板一直在」：turn-3 早就有了
+      // 自己的面板，只等它存在等于什么都没测（旧实现下同样会绿）。
+      var newestRow = document.getElementById('row-turn-3')
+      var newestHost = newestRow === null ? null : newestRow.parentElement
+      var stalePanels = newestHost === null ? [] : newestHost.querySelectorAll('[data-dsh-session-translator="panel"]')
+      for (var si = 0; si < stalePanels.length; si += 1) stalePanels[si].remove()
+      // 面板的译文来自客户端缓存，重建不会再打模型——所以这里测的是「对账窗口
+      // 覆盖不覆盖末尾」，与网络无关。
+      var rebuilt = await waitFor(function () {
+        var p = newestHost === null ? null : newestHost.querySelector('[data-dsh-session-translator="panel"]')
+        return p !== null ? p : null
+      }, 20000)
+      log('a 100-row history does not starve the newest turn',
+        rebuilt !== null,
+        rebuilt === null ? 'the newest row never got its panel back' : 'rebuilt')
+      // 再推进一轮：只有末尾被重新翻译，才说明它真的在对账窗口里。
+      var retranslated = await waitFor(function () {
+        var p = newestHost === null ? null : newestHost.querySelector('[data-dsh-session-translator="panel"]')
+        return p !== null && /【中】/.test(p.textContent) ? p : null
+      }, 20000)
+      log('the rebuilt panel on a long transcript carries the translation',
+        retranslated !== null,
+        retranslated === null ? 'panel present but empty' : 'translated')
       // Master switch off: every panel goes away.
       await fetch('/dsh-session-translator/config', {
         method: 'PUT',
