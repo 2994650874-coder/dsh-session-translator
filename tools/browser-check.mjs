@@ -519,6 +519,15 @@ ${shellFixtures()}
       if (retry2 !== null) retry2.click()
       await new Promise(function (resolve) { setTimeout(resolve, 900) })
       log('scrolling up hands the position to the reader', scrollBody.scrollTop <= 30, scrollBody.scrollTop)
+      // 关掉回合跟随：已收起的旧回合必须重新展开（"关掉即恢复"，不是只停用规则）。
+      await fetch('/dsh-session-translator/config', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ section: { autoTurnFollow: false } }),
+      })
+      document.dispatchEvent(new Event('visibilitychange'))
+      var reopened = await waitFor(function () { return collapsedOf(turn2) === 'false' }, 20000)
+      log('turning the setting off re-expands the folded turns', reopened !== null, collapsedOf(turn2))
       // Master switch off: every panel goes away.
       await fetch('/dsh-session-translator/config', {
         method: 'PUT',
