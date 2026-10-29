@@ -58,7 +58,6 @@ const BASE_CONFIG = {
   concurrency: 2,
   cacheEntries: 100,
   skipMostlyChinese: true,
-  showOriginal: false,
   fontSizePx: 13,
   // [PATCH 2026-10-19 fallback-route] 备用路由默认关闭，测试按需覆盖。
   fallbackProvider: '',

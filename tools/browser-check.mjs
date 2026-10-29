@@ -176,7 +176,6 @@ const server = {
     concurrency: 2,
     cacheEntries: 600,
     skipMostlyChinese: true,
-    showOriginal: false,
     fontSizePx: 13,
     // [PATCH 2026-10-30 turn-follow] 回合跟随默认开，fixture 显式写出来，
     // 免得默认值一改，下面的回合断言变成静默失效。
@@ -470,6 +469,13 @@ ${shellFixtures()}
       log('streaming text never requested', stats.translateCalls.indexOf(${JSON.stringify(REASONING_D)}) === -1)
 
       // [PATCH 2026-10-30 head-click] 「收起/展开」按钮已撤，整个头胶囊是开关。
+      // [PATCH 2026-10-30 drop-orig] 「思考原文」按钮与面板内原文块已删：
+      // 官方思考行自己可点，面板不该再做一遍。
+      var staleOrig = expanded.querySelector('[data-act="orig"]')
+      var staleOrigBlock = expanded.querySelector('[data-role="orig"]')
+      log('the original-text button is gone', staleOrig === null && staleOrigBlock === null,
+        staleOrig === null ? (staleOrigBlock === null ? '' : 'orig block still present') : 'orig button still present')
+
       // Panel buttons must stop propagation into the row handler.
       window.__rowClicked = 0
       var head = expanded.querySelector('[data-role="head"]')
