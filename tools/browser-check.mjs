@@ -129,6 +129,9 @@ const REASONING_D = 'Streaming blocks are only translated when live translation 
 const TURN_TEXT_1 = 'The first turn finished a while ago and the reader has moved on, so this translation should fold away as soon as a newer turn exists.'
 const TURN_TEXT_2 = 'The second turn is the newest one the reader is actually looking at, so its translation must stay open while it is the current turn.'
 const TURN_TEXT_3 = 'A third turn has just arrived, which is what should fold the second turn away without touching anything the reader opened by hand.'
+// [PATCH 2026-10-30 latest-only] 同一回合里的两个思考块。
+const SPLIT_TEXT_A = 'The earlier reasoning block of the same turn has already been overtaken by a newer block, so its translation should be folded even though the turn is still the newest one.'
+const SPLIT_TEXT_B = 'The later reasoning block of the same turn is the one the reader is actually waiting on, so its translation is the only one that stays open.'
 // 译文框必须真的能滚，否则"跟随滚动"这条断言会退化成永远成立。
 const TURN_LONG_TAIL = Array.from({ length: 40 }, (_unused, i) => 'line ' + (i + 1) + ': the translation keeps growing while the model is still thinking.').join(String.fromCharCode(10))
 
@@ -343,6 +346,18 @@ function shellFixtures() {
     <div class="lcKema_bodywrap"><div class="lcKema_thinkBody">${TURN_TEXT_2}</div></div>
   </div>
 </div>
+<!-- [PATCH 2026-10-30 latest-only] 同一个回合里两个思考块：只有最后那个该展开，
+     前面的块属于同一回合但已经"过去了"。dsh-smooth-stream 的判据是 expanded=running。 -->
+<div class="turn" data-chat-turn="3" id="turn-3-split">
+  <div class="lcKema_root" id="row-split-a" data-variant="think" data-state="ok" data-expanded>
+    <div class="lcKema_row"><span class="lcKema_title">思考</span></div>
+    <div class="lcKema_bodywrap"><div class="lcKema_thinkBody">${SPLIT_TEXT_A}</div></div>
+  </div>
+  <div class="lcKema_root" id="row-split-b" data-variant="think" data-state="ok" data-expanded>
+    <div class="lcKema_row"><span class="lcKema_title">思考</span></div>
+    <div class="lcKema_bodywrap"><div class="lcKema_thinkBody">${SPLIT_TEXT_B}</div></div>
+  </div>
+</div>
 <div class="lcKema_root" id="row-expanded" data-variant="think" data-state="ok" data-expanded>
   <div class="lcKema_row"><span class="lcKema_title">思考</span></div>
   <div class="lcKema_bodywrap"><div class="lcKema_thinkBody">${REASONING_A}</div></div>
@@ -448,7 +463,8 @@ ${shellFixtures()}
       // [PATCH 2026-10-30 turn-follow] fixture 里多了两段回合样本（TURN_TEXT_1/2），
       // 所以"两条不同文本"的旧口径变成四条。改断言而不是改 fixture：丢样本会让
       // 回合断言失去可翻译的真实内容。
-      log('two distinct texts, four requests (incl. the turn samples)', stats.translateCalls.length === 4, JSON.stringify(stats.translateCalls.map(function (t) { return t.slice(0, 20) })))
+      // [PATCH 2026-10-30 latest-only] fixture 又多了同轮两块样本，四 → 六。
+      log('six distinct texts, six requests (incl. the turn samples)', stats.translateCalls.length === 6, JSON.stringify(stats.translateCalls.map(function (t) { return t.slice(0, 20) })))
       log('identical text requested once', stats.translateCalls.filter(function (t) { return t === ${JSON.stringify(REASONING_A)} }).length === 1)
       log('collapsed text never requested', stats.translateCalls.indexOf(${JSON.stringify(REASONING_B)}) === -1)
       log('streaming text never requested', stats.translateCalls.indexOf(${JSON.stringify(REASONING_D)}) === -1)
@@ -477,7 +493,10 @@ ${shellFixtures()}
       }
       log('both turns translated', turn1 !== null && turn2 !== null && /【中】/.test(turn1.textContent) && /【中】/.test(turn2.textContent),
         collapsedOf(turn1) + '/' + collapsedOf(turn2))
-      log('the newest turn stays expanded', collapsedOf(turn2) === 'false', collapsedOf(turn2))
+      // [PATCH 2026-10-30 latest-only] 展开单位改成"文档最末尾那一个思考块"后，
+      // turn-2 不再是尾块（turn-3 的两块在它后面），所以它也该收起。真正的
+      // "最新还开着"由下面的 latest-only 一组断言守（split-b）。
+      log('every non-tail turn folds to one line', collapsedOf(turn2) === 'true', collapsedOf(turn2))
       log('the older turn folds to one line', collapsedOf(turn1) === 'true', collapsedOf(turn1))
 
       // 读者手动展开旧回合 → 闩锁，此后新回合也不会把它收回。
@@ -498,7 +517,8 @@ ${shellFixtures()}
       await waitFor(function () { return collapsedOf(turn2) === 'true' }, 12000)
       log('a newer turn folds the previous one', collapsedOf(turn2) === 'true', collapsedOf(turn2))
       log('a panel the reader opened is never auto-folded', collapsedOf(turn1) === 'false', collapsedOf(turn1))
-      log('the arriving turn itself stays open', collapsedOf(turn3Panel) === 'false', collapsedOf(turn3Panel))
+      // [PATCH 2026-10-30 latest-only] 这就是"最末尾那个块保持展开"的正向断言。
+      log('the tail block of the newest turn stays open', collapsedOf(turn3Panel) === 'false', collapsedOf(turn3Panel))
 
       // 跟随滚动：译文超过限高框时，框内应自动跟到底（除非读者上滚）。
       var scrollBody = bodyOf(turn3Panel)
@@ -519,6 +539,18 @@ ${shellFixtures()}
       if (retry2 !== null) retry2.click()
       await new Promise(function (resolve) { setTimeout(resolve, 900) })
       log('scrolling up hands the position to the reader', scrollBody.scrollTop <= 30, scrollBody.scrollTop)
+      // [PATCH 2026-10-30 latest-only] 同一回合里两块思考：只展开最后那块。
+      // 这一条是"按回合"与"按最末尾块"两种实现的唯一区分点，缺了它两种写法都绿。
+      var splitA = panelIn('row-split-a')
+      var splitB = panelIn('row-split-b')
+      var splitReady = await waitFor(function () {
+        return splitA !== null && splitB !== null && /【中】/.test(splitA.textContent) && /【中】/.test(splitB.textContent)
+      }, 15000)
+      log('both blocks of one turn get translated', splitReady !== null)
+      // 此刻文档末尾是运行时追加的 row-turn-3（第三轮），所以 split-b 也不再是尾块。
+      // "尾块保持展开"由下一组断言（turn-3 自己的面板）守，这里只断言被越过的那块收了。
+      log('an overtaken block folds even inside the newest turn', collapsedOf(splitA) === 'true', collapsedOf(splitA))
+      log('a later block of the same turn is folded once a newer turn arrives', collapsedOf(splitB) === 'true', collapsedOf(splitB))
       // 关掉回合跟随：已收起的旧回合必须重新展开（"关掉即恢复"，不是只停用规则）。
       await fetch('/dsh-session-translator/config', {
         method: 'PUT',
