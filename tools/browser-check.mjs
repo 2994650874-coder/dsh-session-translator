@@ -137,6 +137,9 @@ const TURN_LONG_TAIL = Array.from({ length: 40 }, (_unused, i) => 'line ' + (i +
 // [PATCH 2026-11-01 body-reveal] 显影回归样本：必须足够长，长到帧数够多，
 // 采样才抓得到"中间态"。短句 0.26s 走完，取样窗口里只剩首末两帧。
 const REVEAL_TEXT = Array.from({ length: 30 }, (_unused, i) => 'Paragraph ' + (i + 1) + ' of a translation that must appear gradually instead of landing as one block.').join(' ')
+// [PATCH 2026-11-01 fold-anim] 收回动画的样本：正文必须够高，否则"中间高度"与
+// 收起高度只差几个像素，采样分辨不出来（也说明不了读者能看到什么）。
+const FOLD_TEXT_A = Array.from({ length: 14 }, (_unused, i) => 'Line ' + (i + 1) + ': this translation is tall enough that folding it back into the pill is visible even at a glance.').join(' ')
 
 // [PATCH 2026-10-19 dropdown-row-squash] 模型下拉的回归样本：真机上
 // workbuddy-ai 注册了 12 个模型，正是"候选总高超过 maxHeight 260px → flex
@@ -612,6 +615,8 @@ ${shellFixtures()}
       log('clicking the folded preview expands the older turn', collapsedOf(turn1) === 'false', collapsedOf(turn1))
 
       // 第三轮到达（用户发了下一条消息）：旧回合该收，但闩锁的那一条不动。
+
+
       var turn3 = document.createElement('div')
       turn3.className = 'turn'
       turn3.setAttribute('data-chat-turn', '3')
@@ -711,6 +716,107 @@ ${shellFixtures()}
       log('the rebuilt panel on a long transcript carries the translation',
         retranslated !== null,
         retranslated === null ? 'panel present but empty' : 'translated')
+
+      // [PATCH 2026-11-01 fold-anim] 收回必须看得出来。判据不是「最终收起了」
+      // （瞬切的终点值完全一样），而是途中量到一个中间高度：
+      //   展开高度 > 过渡中高度 > 收起高度，且这段期间正文带 data-folding。
+      // 样本必须是长译文：一行字的正文与收起高度只差几像素，量不出中间态。
+      var foldTurn = document.createElement('div')
+      foldTurn.className = 'turn'
+      // 回合号必须比 bulk 历史（10..109）更大：否则它会被"非尾回合"规则收起，
+      // 量到的是一个已经收起的框，收回动画根本不会发生。
+      foldTurn.setAttribute('data-chat-turn', '200')
+      foldTurn.id = 'turn-fold'
+      foldTurn.innerHTML = '<div class="lcKema_root" id="row-fold" data-variant="think" data-state="ok" data-expanded>' +
+        '<div class="lcKema_row"><span class="lcKema_title">思考</span></div>' +
+        '<div class="lcKema_bodywrap"><div class="lcKema_thinkBody">' + ${JSON.stringify(FOLD_TEXT_A)} + '</div></div></div>'
+      document.body.appendChild(foldTurn)
+      var foldPanel = await waitFor(function () {
+        var p = panelIn('row-fold')
+        return p !== null && /【中】/.test(p.textContent) ? p : null
+      }, 20000)
+      await settleReveals()
+      var foldBody = foldPanel === null ? null : foldPanel.querySelector('[data-role="body"]')
+      var foldHead = foldPanel === null ? null : foldPanel.querySelector('[data-role="head"]')
+      log('the fold sample row is open and translated',
+        foldBody !== null && foldHead !== null && foldBody.getAttribute('data-collapsed') === 'false',
+        foldBody === null ? 'no body' : foldBody.getAttribute('data-collapsed'))
+      var openHeight = foldBody.getBoundingClientRect().height
+      foldHead.click()
+      var midHeight = foldBody.getBoundingClientRect().height
+      var midFolding = foldBody.getAttribute('data-folding')
+      await new Promise(function (resolve) { setTimeout(resolve, 340) })
+      var endHeight = foldBody.getBoundingClientRect().height
+      log('folding runs through an intermediate height',
+        midFolding === '1' && midHeight > endHeight + 4 && midHeight < openHeight - 4,
+        'open=' + Math.round(openHeight) + ' mid=' + Math.round(midHeight) + ' end=' + Math.round(endHeight) + ' folding=' + midFolding)
+      log('folding settles on the one-line height',
+        endHeight > 0 && endHeight < openHeight / 2 && foldBody.getAttribute('data-folding') === null,
+        'open=' + Math.round(openHeight) + ' end=' + Math.round(endHeight) + ' folding=' + foldBody.getAttribute('data-folding')
+          + ' collapsed=' + foldBody.getAttribute('data-collapsed')
+          + ' latch=' + (foldPanel.dataset.manualClosed || '-') + '/' + (foldPanel.dataset.manualOpen || '-')
+          + ' state=' + foldPanel.dataset.state)
+      // 收完之后还要能正常展开（过渡标记必须撤干净，否则下次切换会重放动画）。
+      foldHead.click()
+      await new Promise(function (resolve) { setTimeout(resolve, 340) })
+      log('reopening after a fold restores the full height',
+        foldBody.getBoundingClientRect().height >= openHeight - 4 && foldBody.getAttribute('data-folding') === null,
+        'now=' + Math.round(foldBody.getBoundingClientRect().height) + ' want=' + Math.round(openHeight)
+          + ' collapsed=' + foldBody.getAttribute('data-collapsed')
+          + ' folding=' + foldBody.getAttribute('data-folding')
+          + ' text=' + foldBody.textContent.length
+          + ' ws=' + getComputedStyle(foldBody).whiteSpace
+          + ' maxh=' + getComputedStyle(foldBody).maxHeight
+          + ' hidden=' + foldBody.hidden)
+      // 读者亲手收起**当前回合那一块**之后，220ms 一次的对账不许把它重新摊开。
+      // 这是手册风险 #23 第二条缺失的回归：只有正向断言（当前回合会展开）时，
+      // 把 manualClosed 判断删掉照样全绿。
+      // 先把回合跟随恢复成开：下面这条要验的正是**自动回合规则**会不会去重新摊开
+      // 读者亲手收起的那一块。关着的时候走的是另一条分支（"关掉即恢复"），
+      // 测不到 applyTurnFollow 里的 manualClosed 闸门。
+      await fetch('/dsh-session-translator/config', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ section: { autoTurnFollow: true } }),
+      })
+      document.dispatchEvent(new Event('visibilitychange'))
+      await new Promise(function (resolve) { setTimeout(resolve, 800) })
+      if (foldBody.getAttribute('data-collapsed') !== 'true') foldHead.click()
+      await new Promise(function (resolve) { setTimeout(resolve, 340) })
+      // 必须**主动逼一次对账**：移除本闸门时，若没有新的 DOM 变动，MutationObserver
+      // 不会自己触发，sync() 根本不跑——断言于是两种实现都绿（实测踩过）。
+      // visibilitychange 会走 refresh() → safeSync()，是确定性的触发点。
+      document.dispatchEvent(new Event('visibilitychange'))
+      await new Promise(function (resolve) { setTimeout(resolve, 900) })   // 跨过至少三次对账
+      log('a block the reader closed by hand stays closed',
+        foldBody.getAttribute('data-collapsed') === 'true' && foldPanel.dataset.manualOpen === undefined,
+        'collapsed=' + foldBody.getAttribute('data-collapsed') + ' open=' + (foldPanel.dataset.manualOpen || '-') + ' closed=' + (foldPanel.dataset.manualClosed || '-'))
+      // 显影途中被收起：文字必须落到终稿，不能停在半句话（展开了也不会自愈）。
+      if (foldPanel !== null) {
+        foldHead.click()   // 展开
+        await new Promise(function (resolve) { setTimeout(resolve, 340) })
+        var fullLength = ('【中】' + ${JSON.stringify(FOLD_TEXT_A)}).length
+        // 重译出来的还是同一段文字，而正文已经是它——revealInto 会走"前缀已到终点"
+        // 的分支直接落定，根本没有中间态可测。先把正文截短成前缀，制造一次真正的
+        // 补写型显影（对应 live 追赶那种"同一句话在变长"的场景）。
+        foldBody.textContent = foldBody.textContent.slice(0, 120)
+        var retryWhileRevealing = foldPanel.querySelector('[data-act="retry"]')
+        if (retryWhileRevealing !== null) retryWhileRevealing.click()
+        // 不能用固定延时等"显影进行中"：请求什么时候回来是不确定的，90ms 时正文
+        // 可能还是上一稿的完整文本，量到的 mid 就等于 full，这条断言会静默失效
+        // （踩过）。等的是那个确定的中间态：带 revealing 标记且长度严格小于终稿。
+        var midState = await waitFor(function () {
+          if (foldBody.getAttribute('data-dsh-session-translator-revealing') !== '1') return null
+          var n = foldBody.textContent.length
+          return n > 0 && n < fullLength ? n : null
+        }, 8000)
+        var midRevealLength = midState === null ? -1 : midState
+        foldHead.click()   // 显影途中收起
+        await new Promise(function (resolve) { setTimeout(resolve, 60) })
+        log('collapsing mid-reveal lands the finished translation',
+          midRevealLength > 0 && foldBody.textContent.length === fullLength,
+          'mid=' + midRevealLength + ' after=' + foldBody.textContent.length + ' full=' + fullLength)
+      }
       // Master switch off: every panel goes away.
       await fetch('/dsh-session-translator/config', {
         method: 'PUT',

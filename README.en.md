@@ -357,7 +357,7 @@ dsh-session-translator/
 
 ## Version History
 
-**Current version `0.2.1-5`, aligned with the official DSH release number.**
+**Current version `0.2.1-6`, aligned with the official DSH release number.**
 
 Versioning rules:
 
@@ -384,7 +384,8 @@ Versioning rules:
 | `0.2.1` | 2026-10-20 | Aligned with DSH | Aligned with DSH; bilingual plugin description; versioning scheme established |
 | `0.2.1-1` | 2026-10-20 | First npm release | Lifecycle teardown (`dispose`); `author` moved to the fork maintainer with the original author in `contributors`; first npm publication (prerelease channel) |
 | `0.2.1-4` | 2026-10-30 | Turn follow | Only the current turn's translation stays open; the previous turn folds into a one-line preview when the next message arrives (animated, not a snap). A panel you opened by hand is latched open and never auto-folded. The translation box follows its own bottom while text grows, and scrolling up or dragging a selection hands the position straight back. |
-| `0.2.1-5` | 2026-11-01 | **Current · reveal** | The translation no longer lands as one block: it is laid down frame by frame, so the text visibly flows into place. Duration scales with the newly revealed characters and stays inside 260ms–1.1s. Copying, selecting or retrying mid-reveal still yields the finished translation, and a timer fallback guarantees the last characters land even when rAF is throttled in a background tab. |
+| `0.2.1-5` | 2026-11-01 | Reveal | The translation no longer lands as one block: it is laid down frame by frame, so the text visibly flows into place. Duration scales with the newly revealed characters and stays inside 260ms–1.1s. Copying, selecting or retrying mid-reveal still yields the finished translation, and a timer fallback guarantees the last characters land even when rAF is throttled in a background tab. |
+| `0.2.1-6` | 2026-11-01 | **Current · fold animation** | The translation no longer vanishes in one frame: it collapses into the pill continuously (220ms), keeping multi-line layout while the lines are clipped one by one instead of snapping to a single line first. A block the reader closed by hand is latched and never reopened by the turn rule or by turning the setting off. Collapsing mid-reveal lands the finished text, so reopening never shows half a sentence. |
 
 ## Changelog (maintained fork)
 
@@ -392,6 +393,8 @@ Versioning rules:
 
 ### 2026-11-01
 
+- **Fold animation** (`fold-anim`): collapsing into the pill is no longer a snap; the height closes continuously over 220ms. The trick is not `transition` but **not reflowing during the transition**: the collapsed rule sets `white-space:nowrap`, which applies instantly, so the text reflows from a dozen lines into one and the element's height shrinks immediately — no `max-height` duration can chase an element that already became short (it is a ceiling, not a height). Holding `nowrap` off with `data-folding` for the duration is what makes the lines clip one by one. The start height is pinned in pixels before being released, because the collapsed height is a `var() + calc()` expression that may not interpolate. The same animation runs when the reader clicks the pill to close — that gesture *is* "fold back into the bar".
+  Two previously uncovered reverse conditions are fixed with it: **a block the reader closed by hand is latched (`manualClosed`)** so neither the turn rule nor "turning the setting off" reopens it (without this, a 220ms reconcile re-expands the block right after it is closed, which reads as "the close button does nothing"); and **collapsing mid-reveal lands the finished text** (cancelling the frame loop alone leaves half a sentence that never heals on reopen).
 - **Reveal instead of a block landing** (`body-reveal`): a translation arrives as one HTTP response, so writing it into the panel in one assignment reads as "a chunk of text was shot into the box". It is now laid down frame by frame. Duration scales with the characters added *this* time and is clamped to 260ms–1.1s, with an ease-out curve so the last characters settle rather than snap. Three branches decide what gets revealed: a first render reveals from the start; a response that extends the current text reveals only the new tail (live chasing stays smooth instead of re-typing the top half); a response that rewrites more than half the text is written directly, because animating a rewrite only flickers. The frame loop mutates the text node's `.data` and never replaces the node — the `select-safe` guarantee depends on the node staying put, since replacing it collapses and clears the reader's selection. Dragging a selection mid-reveal lands the finished translation immediately, the copy button reads the reveal's target text (never half a sentence), and a timer fallback covers background tabs where rAF is throttled. Regression `browser-check.mjs` 60 → 64, reverse-verified by restoring the single-assignment write.
 
 ### 2026-10-20
