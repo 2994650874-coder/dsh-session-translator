@@ -134,6 +134,9 @@ const SPLIT_TEXT_A = 'The earlier reasoning block of the same turn has already b
 const SPLIT_TEXT_B = 'The later reasoning block of the same turn is the one the reader is actually waiting on, so its translation is the only one that stays open.'
 // 译文框必须真的能滚，否则"跟随滚动"这条断言会退化成永远成立。
 const TURN_LONG_TAIL = Array.from({ length: 40 }, (_unused, i) => 'line ' + (i + 1) + ': the translation keeps growing while the model is still thinking.').join(String.fromCharCode(10))
+// [PATCH 2026-11-01 body-reveal] 显影回归样本：必须足够长，长到帧数够多，
+// 采样才抓得到"中间态"。短句 0.26s 走完，取样窗口里只剩首末两帧。
+const REVEAL_TEXT = Array.from({ length: 30 }, (_unused, i) => 'Paragraph ' + (i + 1) + ' of a translation that must appear gradually instead of landing as one block.').join(' ')
 
 // [PATCH 2026-10-19 dropdown-row-squash] 模型下拉的回归样本：真机上
 // workbuddy-ai 注册了 12 个模型，正是"候选总高超过 maxHeight 260px → flex
@@ -333,6 +336,13 @@ function shellFixtures() {
      data-chat-turn 挂在每一行外面，插件只读它。 */
   .turn { margin: 8px 0; }
 </style>
+<!-- [PATCH 2026-11-01 body-reveal] 显影采样行：面板正文节点挂在这行下面时带
+     id="reveal-host" 不可行（节点是插件建的），所以采样器按"父节点是这条推理行
+     的面板"认领，见 fixture 脚本里的 revealSamples。 -->
+<div class="lcKema_root" id="row-reveal" data-variant="think" data-state="ok" data-expanded>
+  <div class="lcKema_row"><span class="lcKema_title">思考</span></div>
+  <div class="lcKema_bodywrap"><div class="lcKema_thinkBody">${REVEAL_TEXT}</div></div>
+</div>
 <div class="turn" data-chat-turn="1" id="turn-1">
   <div class="lcKema_root" id="row-turn-1" data-variant="think" data-state="ok" data-expanded>
     <div class="lcKema_row"><span class="lcKema_title">思考</span></div>
@@ -437,9 +447,33 @@ ${shellFixtures()}
         })
       }
 
+      // [PATCH 2026-11-01 body-reveal] 显影采样必须在**译文落地之前**挂上去：动画
+      // 一落地就开始逐帧长出来，等译文数量够三个再来看，动画早跑完了。
+      // 观察 document.body 上所有字符数据变化，事后按文本前缀认领显影行那一条。
+      var revealSamples = []
+      var revealObserver = new MutationObserver(function (records) {
+        for (var r = 0; r < records.length; r += 1) {
+          if (records[r].type !== 'characterData') continue
+          var data = String(records[r].target.data === undefined ? '' : records[r].target.data)
+          if (data.indexOf('【中】Paragraph 1') === 0) revealSamples.push(data.length)
+        }
+      })
+      revealObserver.observe(document.body, { subtree: true, characterData: true })
+
+      // [PATCH 2026-11-01 body-reveal] 显影让"译文已经出现"变成一个**过程**：
+      // 正文先为空、再逐帧长出。凡是断言具体文本的地方都必须先等显影落地，
+      // 否则量到的是半句话——那不是回归，是采样跑在动画前面。
+      function noRevealInFlight() { return document.querySelectorAll('[data-dsh-session-translator-revealing]').length === 0 }
+      async function settleReveals() {
+        await waitFor(noRevealInFlight, 8000)
+        await new Promise(function (resolve) { setTimeout(resolve, 40) })
+      }
+
       var ok = await waitFor(function () { return translatedPanels().length >= 3 }, 12000)
       log('three rows translated', ok !== null, translatedPanels().length)
 
+      // 面板是"先出空正文、再逐帧长出"的，任何按文本断言的检查都必须等显影落地。
+      await settleReveals()
       var expanded = panelIn('row-expanded')
       var duplicate = panelIn('row-duplicate')
       var geometry = panelIn('row-geometry')
@@ -458,12 +492,61 @@ ${shellFixtures()}
       var original = document.querySelector('#row-expanded .lcKema_thinkBody').textContent
       log('original text preserved', original === ${JSON.stringify(REASONING_A)}, original.slice(0, 30))
 
+      // [PATCH 2026-11-01 body-reveal] 显影：译文不许一整块落地。
+      var revealPanel = panelIn('row-reveal')
+      var revealBody = revealPanel === null ? null : revealPanel.querySelector('[data-role="body"]')
+      var revealFull = '【中】' + ${JSON.stringify(REVEAL_TEXT)}
+      // 先等它真的开始长（半个窗口内必然出现中间态），再等落定。直接等落定会把
+      // "有没有中间态"让给采样计数，而采样在慢机器上可能一帧都没赶上。
+      var revealStarted = await waitFor(function () {
+        return revealBody !== null && revealBody.getAttribute('data-dsh-session-translator-revealing') === '1'
+          && revealBody.textContent.length > 0 && revealBody.textContent.length < revealFull.length
+      }, 8000)
+      var revealDone = await waitFor(function () {
+        return revealBody !== null && revealBody.textContent === revealFull
+      }, 8000)
+      log('the translation does not land as one block',
+        revealStarted !== null || revealSamples.some(function (n) { return n > 0 && n < revealFull.length }),
+        'started=' + (revealStarted !== null) + ' samples=' + revealSamples.length + ' lens=' + JSON.stringify(revealSamples.slice(0, 6)))
+      log('the reveal ends on the whole translation',
+        revealDone !== null,
+        revealBody === null ? 'no body' : String(revealBody.textContent.length) + '/' + revealFull.length)
+      log('the reveal only ever grows',
+        revealSamples.every(function (n, i) { return i === 0 || n >= revealSamples[i - 1] }),
+        JSON.stringify(revealSamples.slice(0, 8)))
+      // 复制按钮不能在显影途中复制出半句话。
+      if (revealPanel !== null) {
+        var revealCopy = revealPanel.querySelector('[data-act="copy"]')
+        var copied = ''
+        var clipboardAvailable = navigator.clipboard !== undefined && typeof navigator.clipboard.writeText === 'function'
+        if (clipboardAvailable) {
+          var originalWrite = navigator.clipboard.writeText.bind(navigator.clipboard)
+          navigator.clipboard.writeText = function (value) { copied = String(value); return Promise.resolve() }
+          var retryForCopy = revealPanel.querySelector('[data-act="retry"]')
+          if (retryForCopy !== null) retryForCopy.click()
+          await new Promise(function (resolve) { setTimeout(resolve, 60) })
+          if (revealCopy !== null) revealCopy.click()
+          navigator.clipboard.writeText = originalWrite
+        }
+        log('copying mid-reveal yields the whole translation',
+          clipboardAvailable !== true || copied === revealFull,
+          clipboardAvailable !== true ? 'clipboard unavailable' : String(copied.length) + '/' + revealFull.length)
+      }
+
       var stats = await (await fetch('/__stats', { cache: 'no-store' })).json()
       // [PATCH 2026-10-30 turn-follow] fixture 里多了两段回合样本（TURN_TEXT_1/2），
       // 所以"两条不同文本"的旧口径变成四条。改断言而不是改 fixture：丢样本会让
       // 回合断言失去可翻译的真实内容。
       // [PATCH 2026-10-30 latest-only] fixture 又多了同轮两块样本，四 → 六。
-      log('six distinct texts, six requests (incl. the turn samples)', stats.translateCalls.length === 6, JSON.stringify(stats.translateCalls.map(function (t) { return t.slice(0, 20) })))
+      // [PATCH 2026-11-01 body-reveal] 口径改成「每段不同的思考各请求一次」：显影
+      // 相关的重译（点「重新翻译」验证复制）会让总次数随测试步骤漂，而这条断言真正
+      // 要守的是"不同文本不重复请求"。
+      var distinctCalls = stats.translateCalls.filter(function (t, i, all) { return all.indexOf(t) === i })
+      // 总次数不再固定：验证"显影途中复制"会主动点一次「重新翻译」，那是 force
+      // 重译，本就该多一次请求。这条只守"七段不同的思考都各自请求到了"。
+      log('every distinct thinking block is requested',
+        distinctCalls.length === 7,
+        'distinct=' + distinctCalls.length + ' total=' + stats.translateCalls.length)
       log('identical text requested once', stats.translateCalls.filter(function (t) { return t === ${JSON.stringify(REASONING_A)} }).length === 1)
       log('collapsed text never requested', stats.translateCalls.indexOf(${JSON.stringify(REASONING_B)}) === -1)
       log('streaming text never requested', stats.translateCalls.indexOf(${JSON.stringify(REASONING_D)}) === -1)
@@ -537,7 +620,13 @@ ${shellFixtures()}
         '<div class="lcKema_row"><span class="lcKema_title">思考</span></div>' +
         '<div class="lcKema_bodywrap"><div class="lcKema_thinkBody">' + ${JSON.stringify(TURN_TEXT_3)} + '</div></div></div>'
       document.body.appendChild(turn3)
-      var turn3Panel = await waitFor(function () { return panelIn('row-turn-3') }, 12000)
+      // [PATCH 2026-11-01 body-reveal] 面板先于译文存在（建节点 → 发请求 → 逐帧显影），
+      // 只等"面板出现"会读到空正文。这里等的是**译文真的写进去了**。
+      var turn3Panel = await waitFor(function () {
+        var p = panelIn('row-turn-3')
+        return p !== null && /【中】/.test(p.textContent) ? p : null
+      }, 12000)
+      await settleReveals()
       log('the arriving turn is translated', turn3Panel !== null && /【中】/.test(turn3Panel.textContent))
       await waitFor(function () { return collapsedOf(turn2) === 'true' }, 12000)
       log('a newer turn folds the previous one', collapsedOf(turn2) === 'true', collapsedOf(turn2))

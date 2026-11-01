@@ -357,7 +357,7 @@ dsh-session-translator/
 
 ## Version History
 
-**Current version `0.2.1-4`, aligned with the official DSH release number.**
+**Current version `0.2.1-5`, aligned with the official DSH release number.**
 
 Versioning rules:
 
@@ -382,12 +382,17 @@ Versioning rules:
 | `0.1.5` | 2026-10-19 | Channel adaptation & stability | Streaming locked by channel type; browser-check portability; model dropdown row height fix |
 | `0.1.6` | 2026-10-20 | Identity unification & panel usability | Package/routes/storage renamed to dsh-session-translator; save bar moved to the top; description rewritten around capabilities |
 | `0.2.1` | 2026-10-20 | Aligned with DSH | Aligned with DSH; bilingual plugin description; versioning scheme established |
-| `0.2.1-1` | 2026-10-20 | **Current · first npm release** | Lifecycle teardown (`dispose`); `author` moved to the fork maintainer with the original author in `contributors`; first npm publication (prerelease channel) |
-| `0.2.1-4` | 2026-10-30 | **Current · turn follow** | Only the current turn's translation stays open; the previous turn folds into a one-line preview when the next message arrives (animated, not a snap). A panel you opened by hand is latched open and never auto-folded. The translation box follows its own bottom while text grows, and scrolling up or dragging a selection hands the position straight back. |
+| `0.2.1-1` | 2026-10-20 | First npm release | Lifecycle teardown (`dispose`); `author` moved to the fork maintainer with the original author in `contributors`; first npm publication (prerelease channel) |
+| `0.2.1-4` | 2026-10-30 | Turn follow | Only the current turn's translation stays open; the previous turn folds into a one-line preview when the next message arrives (animated, not a snap). A panel you opened by hand is latched open and never auto-folded. The translation box follows its own bottom while text grows, and scrolling up or dragging a selection hands the position straight back. |
+| `0.2.1-5` | 2026-11-01 | **Current · reveal** | The translation no longer lands as one block: it is laid down frame by frame, so the text visibly flows into place. Duration scales with the newly revealed characters and stays inside 260ms–1.1s. Copying, selecting or retrying mid-reveal still yields the finished translation, and a timer fallback guarantees the last characters land even when rAF is throttled in a background tab. |
 
 ## Changelog (maintained fork)
 
 > This repository is a maintained fork of [Eyeing0721/dsh-cot-en2cn](https://github.com/Eyeing0721/dsh-cot-en2cn).
+
+### 2026-11-01
+
+- **Reveal instead of a block landing** (`body-reveal`): a translation arrives as one HTTP response, so writing it into the panel in one assignment reads as "a chunk of text was shot into the box". It is now laid down frame by frame. Duration scales with the characters added *this* time and is clamped to 260ms–1.1s, with an ease-out curve so the last characters settle rather than snap. Three branches decide what gets revealed: a first render reveals from the start; a response that extends the current text reveals only the new tail (live chasing stays smooth instead of re-typing the top half); a response that rewrites more than half the text is written directly, because animating a rewrite only flickers. The frame loop mutates the text node's `.data` and never replaces the node — the `select-safe` guarantee depends on the node staying put, since replacing it collapses and clears the reader's selection. Dragging a selection mid-reveal lands the finished translation immediately, the copy button reads the reveal's target text (never half a sentence), and a timer fallback covers background tabs where rAF is throttled. Regression `browser-check.mjs` 60 → 64, reverse-verified by restoring the single-assignment write.
 
 ### 2026-10-20
 
