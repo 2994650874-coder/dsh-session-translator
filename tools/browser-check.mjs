@@ -430,7 +430,14 @@ ${shellFixtures()}
         register: function (options, component) { sections.push({ options: options, component: component }); return function () {} },
       }
       plugin.apply({ get: function (name) { return name === 'slots' ? slots : undefined }, effect: function (fn) { return fn() } })
-      log('settings section registered', sections.length === 1 && sections[0].options.id === 'session-translator', sections.length)
+      // [PATCH 2026-11-02 settings-slot] 设置卡片从全局设置页的 list slot
+      // （settings.section，靠 id 定址）挪进了插件详情页的 keyed slot
+      // （plugins.bundle.config，靠 key 精确匹配裸包名）。断言跟着改：
+      // key 对不上时宿主**整块不渲染且不报错**，所以这条正是唯一能守住它的地方。
+      log('settings section registered',
+        sections.length === 1 && sections[0].options.name === 'plugins.bundle.config'
+          && sections[0].options.key === 'dsh-session-translator',
+        sections.length === 1 ? JSON.stringify(sections[0].options) : String(sections.length))
 
       function panels() { return document.querySelectorAll('[data-dsh-session-translator="panel"]') }
       function translatedPanels() {
@@ -741,6 +748,11 @@ ${shellFixtures()}
       log('the fold sample row is open and translated',
         foldBody !== null && foldHead !== null && foldBody.getAttribute('data-collapsed') === 'false',
         foldBody === null ? 'no body' : foldBody.getAttribute('data-collapsed'))
+      // [PATCH 2026-11-02 fold-on-screen] 收回动画现在只给视口内的正文播
+      // （屏幕外/新建的先不要那 23ms+120 个 rAF）。所以样本必须先滚进视口，
+      // 否则量到的是"直接落定"，中间高度当然不存在。
+      foldPanel.scrollIntoView({ block: 'center' })
+      await new Promise(function (resolve) { setTimeout(resolve, 120) })
       var openHeight = foldBody.getBoundingClientRect().height
       foldHead.click()
       var midHeight = foldBody.getBoundingClientRect().height
@@ -867,8 +879,12 @@ function settingsHtml() {
         register: function (options, component) { sections.push({ options: options, component: component }); return function () {} },
       }
       plugin.apply({ get: function (name) { return name === 'slots' ? slots : undefined }, effect: function (fn) { return fn() } })
-      log('section registered', sections.length === 1)
-      log('section label', sections.length === 1 && sections[0].options.label() === 'dsh-session-translator', sections.length === 1 ? sections[0].options.label() : '')
+      log('section registered', sections.length === 1, String(sections.length))
+      // keyed slot 没有 label()（标题走 locale 的 meta.title），旧的 label 断言
+      // 在迁移后必然抛 TypeError，把整段后续断言一起带走——所以这里只守 key。
+      log('section key matches the bare package name',
+        sections.length === 1 && sections[0].options.key === 'dsh-session-translator',
+        sections.length === 1 ? String(sections[0].options.key) : '')
 
       var root = window.ReactDOM.createRoot(document.getElementById('root'))
       root.render(window.React.createElement(sections[0].component))
