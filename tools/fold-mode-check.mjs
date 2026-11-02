@@ -135,9 +135,11 @@ function fixtureHtml() {
     )
   })
 
+  // 只放**折叠行**。放一个展开行会让它自己产出全文，
+  // 把"取到全文"的断言满足掉，折叠行取文失败也能绿——那正是这条被子
+  // 之前一直没抓到东西的原因。
   window.__ROWS = [
     { id: 'row-folded', text: ${JSON.stringify(REASONING)}, running: false, expanded: false },
-    { id: 'row-expanded', text: ${JSON.stringify(REASONING)}, running: false, expanded: true },
   ]
 
   function App() {
@@ -371,6 +373,12 @@ try {
   // the React fiber props).
   const foldedPanels = (dom.match(/data-dsh-session-translator="panel"/g) ?? []).length
   ok('a panel was created in fold mode', foldedPanels > 0, `panels=${foldedPanels}`)
+
+  // 精确到"折叠行自己"：上面那条只看总数，展开行的面板就能满足它，
+  // 于是折叠行哪怕完全没翻也照样绿。这条才是 fold 模式的真断言。
+  ok('the FOLDED row itself got a panel (not just the expanded one)',
+    dom.includes('id="row-folded"') && /id="row-folded"[\s\S]{0,4000}?data-dsh-session-translator="panel"/.test(dom),
+    `foldedPanels=${foldedPanels}`)
 
   ok('the translator actually called /translate', translateCalls > 0, `calls=${translateCalls}`)
 
