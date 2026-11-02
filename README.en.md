@@ -357,7 +357,7 @@ dsh-session-translator/
 
 ## Version History
 
-**Current version `0.2.1-6`, aligned with the official DSH release number.**
+**Current version `0.2.1-7`, aligned with the official DSH release number.**
 
 Versioning rules:
 
