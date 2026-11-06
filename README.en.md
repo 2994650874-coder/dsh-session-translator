@@ -357,7 +357,7 @@ dsh-session-translator/
 
 ## Version History
 
-**Current version `0.2.1-7`, aligned with the official DSH release number.**
+**Current version `0.2.2`, aligned with the official DSH release number.**
 
 Versioning rules:
 
@@ -385,7 +385,8 @@ Versioning rules:
 | `0.2.1-1` | 2026-10-20 | First npm release | Lifecycle teardown (`dispose`); `author` moved to the fork maintainer with the original author in `contributors`; first npm publication (prerelease channel) |
 | `0.2.1-4` | 2026-10-30 | Turn follow | Only the current turn's translation stays open; the previous turn folds into a one-line preview when the next message arrives (animated, not a snap). A panel you opened by hand is latched open and never auto-folded. The translation box follows its own bottom while text grows, and scrolling up or dragging a selection hands the position straight back. |
 | `0.2.1-5` | 2026-11-01 | Reveal | The translation no longer lands as one block: it is laid down frame by frame, so the text visibly flows into place. Duration scales with the newly revealed characters and stays inside 260ms–1.1s. Copying, selecting or retrying mid-reveal still yields the finished translation, and a timer fallback guarantees the last characters land even when rAF is throttled in a background tab. |
-| `0.2.1-6` | 2026-11-01 | **Current · fold animation** | The translation no longer vanishes in one frame: it collapses into the pill continuously (220ms), keeping multi-line layout while the lines are clipped one by one instead of snapping to a single line first. A block the reader closed by hand is latched and never reopened by the turn rule or by turning the setting off. Collapsing mid-reveal lands the finished text, so reopening never shows half a sentence. |
+| `0.2.1-6` | 2026-11-01 | Fold animation | The translation no longer vanishes in one frame: it collapses into the pill continuously (220ms), keeping multi-line layout while the lines are clipped one by one instead of snapping to a single line first. A block the reader closed by hand is latched and never reopened by the turn rule or by turning the setting off. Collapsing mid-reveal lands the finished text, so reopening never shows half a sentence. |
+| `0.2.2` | 2026-11-06 | Follow official | Base version follows DSH official `0.2.2-rc.1`; local fourth component reset to zero. Same behavior as `0.2.1-7`, no code behavior changes. |
 
 ## Changelog (maintained fork)
 
